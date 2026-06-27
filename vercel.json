@@ -13,10 +13,5 @@
     "src/app/api/dispatch/route.ts": { "maxDuration": 15 },
     "src/app/api/cron/assign-scheduled/route.ts": { "maxDuration": 60 }
   },
-  "crons": [
-    {
-      "path": "/api/cron/assign-scheduled",
-      "schedule": "*/15 * * * *"
-    }
-  ]
+  "crons": []
 }
