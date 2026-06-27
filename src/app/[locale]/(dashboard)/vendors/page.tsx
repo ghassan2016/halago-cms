@@ -68,12 +68,15 @@ export default function VendorsPage() {
           <h2 className="text-xl font-bold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <Button onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" />
+          {t("add")}
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-[220px] flex-1">
           <SearchBar value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} />
-          <Button onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" />
-            {t("add")}
-          </Button>
         </div>
       </div>
 

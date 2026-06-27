@@ -25,3 +25,6 @@ generate_report.js
 generate_final_report.js
 *.docx
 
+
+.vercel
+.env*

@@ -146,8 +146,16 @@ export default function DriversPage() {
           <h2 className="text-xl font-bold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" />
+          {t("add")}
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-[220px] flex-1">
           <SearchBar value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} />
+        </div>
           <select
             className="flex h-10 rounded-md border border-input bg-background px-3 text-sm"
             value={sort}
@@ -186,12 +194,7 @@ export default function DriversPage() {
           >
             <Download className="h-4 w-4" />
           </Button>
-          <Button onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" />
-            {t("add")}
-          </Button>
         </div>
-      </div>
 
       <BulkBar
         count={selected.size}
