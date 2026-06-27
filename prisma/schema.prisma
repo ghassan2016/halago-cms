@@ -136,6 +136,22 @@ model Trip {
   customer Customer? @relation(fields: [customerId], references: [id])
   driver   Driver?   @relation(fields: [driverId], references: [id])
   vendor   Vendor?   @relation(fields: [vendorId], references: [id])
+  messages TripMessage[]
+}
+
+// رسائل الدردشة بين العميل والكابتن لكل رحلة
+model TripMessage {
+  id         Int       @id @default(autoincrement())
+  tripId     Int
+  senderType String // customer | driver
+  senderId   Int
+  text       String
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, createdAt])
 }
 
 model Transaction {
