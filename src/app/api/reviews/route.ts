@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   const [total, reviews, avg] = await Promise.all([
     prisma.review.count({ where }),
     prisma.review.findMany({ where, skip, take: perPage, orderBy: { createdAt: "desc" } }),
-    prisma.review.aggregate({ _avg: { stars: true }, _count: true }),
+    prisma.review.aggregate({ where: { hidden: false }, _avg: { stars: true }, _count: true }),
   ]);
 
   return ok(

@@ -53,6 +53,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // استرداد المبلغ
   if (action === "refund") {
     if (trip.paymentStatus === "refunded") return fail("تم استرداد هذه الرحلة مسبقاً", 409);
+
+    // خصم اختياري من السائق (عند سوء/خطأ السائق) — يُخصم نصيبه من الرحلة وقد تصبح محفظته سالبة
+    const deductDriver = body?.deductDriver === true && !!trip.driverId;
+    const driverShare = Math.round((trip.fare - trip.commission) * 100) / 100;
+
     const ops: any[] = [
       prisma.transaction.create({
         data: {
@@ -60,7 +65,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           amount: trip.fare,
           actorType: "customer",
           actorId: trip.customerId,
+          actorName: null,
           refId: trip.id,
+          note: deductDriver ? "استرداد بسبب خطأ السائق" : "استرداد إداري",
+          createdById: auth.session?.sub ? Number(auth.session.sub) : null,
+          createdByName: auth.session?.name ?? null,
         },
       }),
       prisma.trip.update({ where: { id }, data: { paymentStatus: "refunded" } }),
@@ -74,17 +83,53 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         })
       );
     }
+    // خصم نصيب السائق وتسجيل حركة سالبة عليه
+    if (deductDriver && trip.driverId && driverShare > 0) {
+      ops.push(
+        prisma.driver.update({
+          where: { id: trip.driverId },
+          data: { walletBalance: { decrement: driverShare } },
+        }),
+        prisma.transaction.create({
+          data: {
+            type: "refund",
+            amount: -driverShare,
+            actorType: "driver",
+            actorId: trip.driverId,
+            refId: trip.id,
+            note: "خصم نصيب السائق نتيجة استرداد للعميل",
+            createdById: auth.session?.sub ? Number(auth.session.sub) : null,
+            createdByName: auth.session?.name ?? null,
+          },
+        })
+      );
+    }
     await prisma.$transaction(ops);
     const updated = await prisma.trip.findUnique({ where: { id } });
-    await logAudit(auth.session, "refund_trip", "trip", id, { number: trip.number, amount: trip.fare });
+    await logAudit(auth.session, "refund_trip", "trip", id, {
+      number: trip.number,
+      amount: trip.fare,
+      deductDriver,
+      driverShare: deductDriver ? driverShare : 0,
+    });
     return ok(updated);
   }
 
   // إلغاء
   if (action === "cancel" || body?.status === "cancelled") {
     if (trip.status === "completed") return fail("لا يمكن إلغاء رحلة مكتملة", 409);
-    const updated = await prisma.trip.update({ where: { id }, data: { status: "cancelled" } });
-    await logAudit(auth.session, "cancel_trip", "trip", id, { number: trip.number });
+    const updated = await prisma.trip.update({
+      where: { id },
+      data: {
+        status: "cancelled",
+        cancelledBy: "admin",
+        cancelledAt: new Date(),
+        cancelReason: body?.reason ? String(body.reason) : trip.cancelReason,
+        cancelReasonKey: body?.reasonKey ? String(body.reasonKey) : trip.cancelReasonKey,
+        cancelAction: "accepted",
+      },
+    });
+    await logAudit(auth.session, "cancel_trip", "trip", id, { number: trip.number, reason: body?.reason });
     return ok(updated);
   }
 

@@ -24,8 +24,13 @@ export async function POST(req: NextRequest) {
   const exists = await prisma.extraFee.findUnique({ where: { key } });
   if (exists) return fail("المفتاح مستخدم مسبقاً", 409);
 
+  // الربط الجغرافي: رسم عام (global) أو خاص بمنطقة (zone)
+  const scope = b?.scope === "zone" ? "zone" : "global";
+  const zoneId = scope === "zone" && b?.zoneId ? Number(b.zoneId) : null;
+  if (scope === "zone" && !zoneId) return fail("يجب تحديد المنطقة للرسم الخاص", 422);
+
   const fee = await prisma.extraFee.create({
-    data: { key, name, amount, active: b?.active !== false },
+    data: { key, name, amount, scope, zoneId, active: b?.active !== false },
   });
   return ok(fee);
 }

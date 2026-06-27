@@ -28,7 +28,18 @@ export default function CancellationsPage() {
   const t = useTranslations("cancellations");
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<{ open: boolean; editing?: CancellationReason }>({ open: false });
-  const [form, setForm] = React.useState({ key: "", labelAr: "", labelEn: "", audience: "both", sortOrder: 0 });
+  const EMPTY = {
+    key: "",
+    labelAr: "",
+    labelEn: "",
+    audience: "both",
+    sortOrder: 0,
+    actionType: "auto_accept",
+    refundPercent: 0,
+    chargeFee: false,
+    description: "",
+  };
+  const [form, setForm] = React.useState(EMPTY);
 
   const { data: reasons, isLoading, isError } = useQuery({
     queryKey: ["cancellation-reasons"],
@@ -36,14 +47,25 @@ export default function CancellationsPage() {
   });
 
   function reset() {
-    setForm({ key: "", labelAr: "", labelEn: "", audience: "both", sortOrder: 0 });
+    setForm(EMPTY);
   }
   function openCreate() {
     reset();
     setModal({ open: true });
   }
   function openEdit(r: CancellationReason) {
-    setForm({ key: r.key, labelAr: r.labelAr, labelEn: r.labelEn, audience: r.audience, sortOrder: r.sortOrder });
+    const ra = r as any;
+    setForm({
+      key: r.key,
+      labelAr: r.labelAr,
+      labelEn: r.labelEn,
+      audience: r.audience,
+      sortOrder: r.sortOrder,
+      actionType: ra.actionType ?? "auto_accept",
+      refundPercent: ra.refundPercent ?? 0,
+      chargeFee: ra.chargeFee ?? false,
+      description: ra.description ?? "",
+    });
     setModal({ open: true, editing: r });
   }
 
@@ -107,7 +129,7 @@ export default function CancellationsPage() {
         </CardHeader>
         <CardContent className="px-0 pt-4">
           {isLoading ? (
-            <TableSkeleton cols={6} />
+            <TableSkeleton cols={8} />
           ) : isError ? (
             <ErrorState />
           ) : rows.length === 0 ? (
@@ -121,6 +143,8 @@ export default function CancellationsPage() {
                   <TableHead>{t("label_ar")}</TableHead>
                   <TableHead>{t("label_en")}</TableHead>
                   <TableHead>{t("audience")}</TableHead>
+                  <TableHead>{t("action")}</TableHead>
+                  <TableHead>{t("policy")}</TableHead>
                   <TableHead>{t("active")}</TableHead>
                   <TableHead className="text-end">{t("actions")}</TableHead>
                 </TableRow>
@@ -134,6 +158,13 @@ export default function CancellationsPage() {
                     <TableCell dir="ltr">{r.labelEn}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">{t(`audience_${r.audience}` as any)}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{t(`action_${(r as any).actionType ?? "auto_accept"}` as any)}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {t("refundPercent")}: {(r as any).refundPercent ?? 0}%
+                      {(r as any).chargeFee ? ` · ${t("chargeFee")}` : ""}
                     </TableCell>
                     <TableCell>
                       <Button
@@ -212,6 +243,48 @@ export default function CancellationsPage() {
                 onChange={(e) => setForm({ ...form, sortOrder: Number(e.target.value) || 0 })}
               />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="actionType">{t("actionType")}</Label>
+              <select
+                id="actionType"
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={form.actionType}
+                onChange={(e) => setForm({ ...form, actionType: e.target.value })}
+              >
+                <option value="auto_accept">{t("action_auto_accept")}</option>
+                <option value="require_approval">{t("action_require_approval")}</option>
+                <option value="escalate_support">{t("action_escalate_support")}</option>
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="refundPercent">{t("refundPercent")}</Label>
+              <Input
+                id="refundPercent"
+                type="number"
+                min={0}
+                max={100}
+                value={form.refundPercent}
+                onChange={(e) => setForm({ ...form, refundPercent: Number(e.target.value) || 0 })}
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.chargeFee}
+              onChange={(e) => setForm({ ...form, chargeFee: e.target.checked })}
+            />
+            {t("chargeFee")}
+          </label>
+          <div>
+            <Label htmlFor="description">{t("description")}</Label>
+            <Input
+              id="description"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setModal({ open: false })}>{t("cancel")}</Button>

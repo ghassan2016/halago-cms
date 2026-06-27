@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
       where,
       skip,
       take: perPage,
-      orderBy: [{ active: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ active: "desc" }, { kind: "asc" }, { createdAt: "desc" }],
     }),
     prisma.blockedEntity.count(),
     prisma.blockedEntity.count({

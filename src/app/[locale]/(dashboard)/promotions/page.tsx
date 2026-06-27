@@ -4,9 +4,10 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 
-import { getPromos, createPromo, deletePromo } from "@/services";
+import { getPromos, createPromo, updatePromo, deletePromo } from "@/services";
+import type { Promo } from "@/types";
 import { getErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -26,27 +27,55 @@ export default function PromotionsPage() {
   const qc = useQueryClient();
   const [page, setPage] = React.useState(1);
   const [open, setOpen] = React.useState(false);
-  const [form, setForm] = React.useState({ code: "", type: "percentage", value: "", minOrder: "", usageLimit: "100", validToDays: "30" });
+  const [editing, setEditing] = React.useState<Promo | null>(null);
+  const EMPTY = { code: "", type: "percentage", value: "", maxDiscount: "", minOrder: "", usageLimit: "100", validToDays: "30", service: "all" };
+  const [form, setForm] = React.useState(EMPTY);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["promos", page],
     queryFn: () => getPromos({ page }),
   });
 
+  function openCreate() {
+    setEditing(null);
+    setForm(EMPTY);
+    setOpen(true);
+  }
+  function openEdit(p: Promo) {
+    setEditing(p);
+    setForm({
+      code: p.code,
+      type: p.type,
+      value: String(p.value),
+      maxDiscount: p.maxDiscount != null ? String(p.maxDiscount) : "",
+      minOrder: String(p.minOrder ?? ""),
+      usageLimit: String(p.usageLimit ?? "100"),
+      validToDays: "30",
+      service: p.service || "all",
+    });
+    setOpen(true);
+  }
+
   const createMut = useMutation({
-    mutationFn: () =>
-      createPromo({
+    mutationFn: () => {
+      const body = {
         code: form.code,
         type: form.type,
         value: Number(form.value),
+        maxDiscount: form.maxDiscount ? Number(form.maxDiscount) : null,
         minOrder: Number(form.minOrder || 0),
         usageLimit: Number(form.usageLimit || 100),
-        validToDays: Number(form.validToDays || 30),
-      }),
+        service: form.service,
+      };
+      return editing
+        ? updatePromo(editing.id, body)
+        : createPromo({ ...body, validToDays: Number(form.validToDays || 30) });
+    },
     onSuccess: () => {
-      toast.success(t("created"));
+      toast.success(editing ? t("updated") : t("created"));
       setOpen(false);
-      setForm({ code: "", type: "percentage", value: "", minOrder: "", usageLimit: "100", validToDays: "30" });
+      setEditing(null);
+      setForm(EMPTY);
       qc.invalidateQueries({ queryKey: ["promos"] });
     },
     onError: (e) => toast.error(getErrorMessage(e)),
@@ -70,7 +99,7 @@ export default function PromotionsPage() {
           <h2 className="text-xl font-bold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
           {t("create")}
         </Button>
@@ -82,7 +111,7 @@ export default function PromotionsPage() {
         </CardHeader>
         <CardContent className="px-0 pt-4">
           {isLoading ? (
-            <TableSkeleton cols={6} />
+            <TableSkeleton cols={9} />
           ) : isError ? (
             <ErrorState />
           ) : promos.length === 0 ? (
@@ -94,6 +123,8 @@ export default function PromotionsPage() {
                   <TableRow>
                     <TableHead>{t("code")}</TableHead>
                     <TableHead>{t("discount")}</TableHead>
+                    <TableHead>{t("maxDiscount")}</TableHead>
+                    <TableHead>{t("serviceLabel")}</TableHead>
                     <TableHead>{t("minOrder")}</TableHead>
                     <TableHead>{t("usage")}</TableHead>
                     <TableHead>{t("validTo")}</TableHead>
@@ -108,18 +139,27 @@ export default function PromotionsPage() {
                       <TableCell className="font-medium">
                         {p.type === "percentage" ? `${p.value}%` : formatCurrency(p.value)}
                       </TableCell>
+                      <TableCell>{p.maxDiscount != null ? formatCurrency(p.maxDiscount) : "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{t(`service_${p.service || "all"}` as any)}</Badge>
+                      </TableCell>
                       <TableCell>{formatCurrency(p.minOrder)}</TableCell>
                       <TableCell>{p.usedCount} / {p.usageLimit}</TableCell>
                       <TableCell className="text-muted-foreground">{formatDate(p.validTo)}</TableCell>
                       <TableCell><StatusBadge status={p.status === "active" ? "active" : "inactive"} /></TableCell>
                       <TableCell>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => confirm({ message: t("deleteConfirm") }).then((ok) => ok && deleteMut.mutate(p.id))}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button size="icon" variant="ghost" onClick={() => openEdit(p)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => confirm({ message: t("deleteConfirm") }).then((ok) => ok && deleteMut.mutate(p.id))}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -131,7 +171,7 @@ export default function PromotionsPage() {
         </CardContent>
       </Card>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={t("createTitle")}>
+      <Modal open={open} onClose={() => setOpen(false)} title={editing ? t("editTitle") : t("createTitle")}>
         <form
           className="space-y-3"
           onSubmit={(e) => {
@@ -162,13 +202,33 @@ export default function PromotionsPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
+              <Label>{t("maxDiscount")}</Label>
+              <Input type="number" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>{t("serviceLabel")}</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={form.service}
+                onChange={(e) => setForm({ ...form, service: e.target.value })}
+              >
+                <option value="all">{t("service_all")}</option>
+                <option value="ride">{t("service_ride")}</option>
+                <option value="delivery">{t("service_delivery")}</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
               <Label>{t("minOrder")}</Label>
               <Input type="number" value={form.minOrder} onChange={(e) => setForm({ ...form, minOrder: e.target.value })} />
             </div>
-            <div className="space-y-1">
-              <Label>{t("validDays")}</Label>
-              <Input type="number" value={form.validToDays} onChange={(e) => setForm({ ...form, validToDays: e.target.value })} />
-            </div>
+            {!editing && (
+              <div className="space-y-1">
+                <Label>{t("validDays")}</Label>
+                <Input type="number" value={form.validToDays} onChange={(e) => setForm({ ...form, validToDays: e.target.value })} />
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>{t("cancel")}</Button>

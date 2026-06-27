@@ -83,7 +83,7 @@ export function computeDiscount(total: number, promo: PromoShape): number {
   return round(discount);
 }
 
-/** المسافة بالكيلومترات بين نقطتين (Haversine) */
+/** المسافة بالكيلومترات بين نقطتين (Haversine — خط مستقيم/هوائي) */
 export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -92,6 +92,39 @@ export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: numb
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// معامل تقريبي لتحويل المسافة الهوائية إلى مسافة طريق فعلية (متوسط حضري ~1.3)
+export const ROAD_DISTANCE_FACTOR = Number(process.env.ROAD_DISTANCE_FACTOR || "1.3");
+
+/**
+ * مسافة الطريق الفعلية (نقطة 5): تستخدم OSRM إن ضُبط OSRM_URL، وإلا تقريب = الهوائية × المعامل.
+ * (تجنّب احتساب المسافة كخط مستقيم في الفواتير وتتبّع الشكاوى).
+ */
+export async function roadDistanceKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): Promise<{ km: number; source: "osrm" | "approx" }> {
+  const base = haversineKm(lat1, lng1, lat2, lng2);
+  const osrm = process.env.OSRM_URL; // مثال: https://router.project-osrm.org
+  if (osrm) {
+    try {
+      const url = `${osrm}/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const j: any = await res.json();
+        const meters = j?.routes?.[0]?.distance;
+        if (typeof meters === "number" && meters > 0) {
+          return { km: Math.round((meters / 1000) * 100) / 100, source: "osrm" };
+        }
+      }
+    } catch {
+      // عند الفشل نرجع للتقريب
+    }
+  }
+  return { km: Math.round(base * ROAD_DISTANCE_FACTOR * 100) / 100, source: "approx" };
 }
 
 /** الذروة المجدولة: أعلى مضاعف لقاعدة مطابقة لليوم/الساعة */

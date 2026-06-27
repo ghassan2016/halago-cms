@@ -5,10 +5,11 @@ import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Star, Package, Route, Plus, Pencil, Trash2 } from "lucide-react";
+import { Star, Package, Route, Plus, Pencil, Trash2, Check, Snowflake, Lock } from "lucide-react";
 
-import { getVendor, getVendorProducts, createProduct, updateProduct, deleteProduct } from "@/services";
+import { getVendor, getVendorProducts, createProduct, updateProduct, deleteProduct, updateVendor, deleteVendor } from "@/services";
 import { getErrorMessage } from "@/lib/api";
+import { useRouter } from "@/i18n/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ export default function VendorDetailPage() {
   const td = useTranslations("details");
   const tp = useTranslations("products");
   const qc = useQueryClient();
+  const router = useRouter();
   const params = useParams();
   const id = params.id as string;
 
@@ -78,6 +80,18 @@ export default function VendorDetailPage() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
+  const statusMut = useMutation({
+    mutationFn: (status: "open" | "frozen" | "closed") => updateVendor(id, { status }),
+    onSuccess: () => { toast.success(t("statusUpdated")); qc.invalidateQueries({ queryKey: ["vendor", id] }); },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const deleteVendorMut = useMutation({
+    mutationFn: () => deleteVendor(id),
+    onSuccess: () => { toast.success(t("deleted")); router.push("/vendors"); },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
   if (isLoading || !v) return <Skeleton className="h-96 rounded-xl" />;
 
   const list = (products ?? []) as Product[];
@@ -107,6 +121,48 @@ export default function VendorDetailPage() {
               <InfoRow label={td("phone")} value={<span dir="ltr">{v.phone || "—"}</span>} />
               <InfoRow label={td("joinedAt")} value={formatDate(v.createdAt)} />
             </div>
+
+            {/* تغيير حالة المتجر */}
+            <div className="mt-4 grid w-full grid-cols-3 gap-2 border-t pt-4">
+              <Button
+                size="sm"
+                variant="success"
+                disabled={v.status === "open" || statusMut.isPending}
+                onClick={() => statusMut.mutate("open")}
+              >
+                <Check className="h-4 w-4" />
+                {t("activate")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={v.status === "frozen" || statusMut.isPending}
+                onClick={() => statusMut.mutate("frozen")}
+              >
+                <Snowflake className="h-4 w-4" />
+                {t("freeze")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={v.status === "closed" || statusMut.isPending}
+                onClick={() => statusMut.mutate("closed")}
+              >
+                <Lock className="h-4 w-4" />
+                {t("close")}
+              </Button>
+            </div>
+            <Button
+              variant="destructive"
+              className="mt-2 w-full"
+              disabled={deleteVendorMut.isPending}
+              onClick={() =>
+                confirm({ message: t("deleteConfirm"), variant: "danger" }).then((ok) => ok && deleteVendorMut.mutate())
+              }
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("delete")}
+            </Button>
           </CardContent>
         </Card>
 

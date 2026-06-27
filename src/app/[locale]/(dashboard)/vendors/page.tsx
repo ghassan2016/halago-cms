@@ -2,28 +2,57 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { useQuery } from "@tanstack/react-query";
-import { Star } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Star, Plus } from "lucide-react";
 
-import { getVendors } from "@/services";
+import { getVendors, createVendor } from "@/services";
+import { getErrorMessage } from "@/lib/api";
 import { Link } from "@/i18n/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
 import { TableSkeleton, EmptyState, ErrorState } from "@/components/data-state";
 import { SearchBar, Pagination, useDebounced } from "@/components/list-toolbar";
 import { formatNumber } from "@/lib/utils";
 
+const EMPTY_VENDOR = { name: "", category: "store", phone: "", address: "", commission: "15" };
+
 export default function VendorsPage() {
   const t = useTranslations("vendors");
+  const qc = useQueryClient();
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const [form, setForm] = React.useState(EMPTY_VENDOR);
   const debounced = useDebounced(search);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["vendors", page, debounced],
     queryFn: () => getVendors({ page, search: debounced }),
+  });
+
+  const createMut = useMutation({
+    mutationFn: () =>
+      createVendor({
+        name: form.name,
+        category: form.category || undefined,
+        phone: form.phone || undefined,
+        address: form.address || undefined,
+        commission: form.commission ? Number(form.commission) : undefined,
+      }),
+    onSuccess: () => {
+      toast.success(t("created"));
+      setOpen(false);
+      setForm(EMPTY_VENDOR);
+      qc.invalidateQueries({ queryKey: ["vendors"] });
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const vendors = data?.data ?? [];
@@ -39,7 +68,13 @@ export default function VendorsPage() {
           <h2 className="text-xl font-bold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
-        <SearchBar value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} />
+        <div className="flex items-center gap-2">
+          <SearchBar value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} />
+          <Button onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" />
+            {t("add")}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -99,6 +134,49 @@ export default function VendorsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Modal open={open} onClose={() => setOpen(false)} title={t("addTitle")}>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => { e.preventDefault(); createMut.mutate(); }}
+        >
+          <div className="space-y-1">
+            <Label>{t("name")}</Label>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>{t("category")}</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              >
+                <option value="restaurant">{t("restaurant")}</option>
+                <option value="grocery">{t("grocery")}</option>
+                <option value="pharmacy">{t("pharmacy")}</option>
+                <option value="store">{t("store")}</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>{t("commission")}</Label>
+              <Input type="number" value={form.commission} onChange={(e) => setForm({ ...form, commission: e.target.value })} dir="ltr" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>{t("phone")}</Label>
+            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} dir="ltr" />
+          </div>
+          <div className="space-y-1">
+            <Label>{t("address")}</Label>
+            <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>{t("cancel")}</Button>
+            <Button type="submit" disabled={createMut.isPending}>{t("save")}</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

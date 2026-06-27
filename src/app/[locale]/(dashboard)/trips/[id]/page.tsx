@@ -31,6 +31,8 @@ export default function TripDetailPage() {
 
   const [reassignOpen, setReassignOpen] = React.useState(false);
   const [selectedDriver, setSelectedDriver] = React.useState<number | "">("");
+  const [refundOpen, setRefundOpen] = React.useState(false);
+  const [deductDriver, setDeductDriver] = React.useState(false);
 
   const { data: trip, isLoading } = useQuery({ queryKey: ["trip", id], queryFn: () => getTrip(id) });
 
@@ -42,8 +44,13 @@ export default function TripDetailPage() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
   const refundMut = useMutation({
-    mutationFn: () => refundTrip(id),
-    onSuccess: () => { toast.success(td("refunded")); refresh(); },
+    mutationFn: () => refundTrip(id, deductDriver),
+    onSuccess: () => {
+      toast.success(td("refunded"));
+      setRefundOpen(false);
+      setDeductDriver(false);
+      refresh();
+    },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
   const reassignMut = useMutation({
@@ -127,7 +134,7 @@ export default function TripDetailPage() {
           <Button
             variant="outline"
             disabled={!canRefund || refundMut.isPending}
-            onClick={() => confirm({ message: td("refundConfirm"), title: td("refund"), variant: "default" }).then((ok) => ok && refundMut.mutate())}
+            onClick={() => { setDeductDriver(false); setRefundOpen(true); }}
           >
             <Undo2 className="h-4 w-4" />
             {td("refund")}
@@ -254,6 +261,31 @@ export default function TripDetailPage() {
               onClick={() => selectedDriver && reassignMut.mutate(Number(selectedDriver))}
             >
               {td("confirmReassign")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* نافذة الاسترداد */}
+      <Modal open={refundOpen} onClose={() => setRefundOpen(false)} title={td("refundTitle")}>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{td("refundConfirm")}</p>
+          <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={deductDriver}
+              onChange={(e) => setDeductDriver(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium">{td("deductDriver")}</span>
+              <span className="block text-xs text-muted-foreground">{td("deductDriverHint")}</span>
+            </span>
+          </label>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setRefundOpen(false)}>{td("cancelBtn")}</Button>
+            <Button disabled={refundMut.isPending} onClick={() => refundMut.mutate()}>
+              {td("confirmRefund")}
             </Button>
           </div>
         </div>

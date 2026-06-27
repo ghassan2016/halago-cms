@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       where,
       skip,
       take: perPage,
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
     }),
     prisma.sosAlert.count({ where: { status: "open" } }),
     prisma.sosAlert.count({ where: { status: { in: ["open", "in_progress"] }, severity: "critical" } }),

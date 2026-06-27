@@ -1,10 +1,8 @@
-// HalaGo CMS — Prisma schema (SQLite للتطوير المحلي بلا خادم خارجي)
-// لتحويلها لـ PostgreSQL: غيّر provider إلى "postgresql" وعدّل DATABASE_URL.
+// HalaGo CMS — Prisma schema
+// لتحويلها لـ SQLite: غيّر provider إلى "sqlite" وعدّل DATABASE_URL.
 
 generator client {
   provider      = "prisma-client-js"
-  // targets الـ binary اللازمة على Vercel (rhel-openssl-3.0.x للـ runtime الحديث)
-  // + native للتطوير المحلّي على Windows.
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
@@ -19,10 +17,10 @@ model Admin {
   name      String
   email     String   @unique
   password  String
-  role      String   @default("super_admin") // super_admin | operations | finance | support | vendor
+  role      String   @default("super_admin")
   avatar    String?
   active    Boolean  @default(true)
-  vendorId  Int? // للدور vendor: المتجر المرتبط بهذا الحساب
+  vendorId  Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -35,18 +33,20 @@ model Driver {
   email         String?  @unique
   phone         String
   avatar        String?
-  status        String   @default("pending") // pending | approved | rejected | suspended
-  available     Boolean  @default(false) // متصل الآن
-  vehicleType   String   @default("car") // car | motorcycle | bike
+  status        String   @default("pending")
+  available     Boolean  @default(false)
+  vehicleType   String   @default("car")
   carMake       String?
   carModel      String?
   plateNumber   String?
   rating        Float    @default(5)
+  tier          String   @default("bronze") // bronze | silver | gold | platinum (يُحتسب من التقييم وعدد الرحلات)
   totalTrips    Int      @default(0)
   walletBalance Float    @default(0)
   city          String?
-  lat           Float? // الموقع اللحظي
+  lat           Float?
   lng           Float?
+  banReason     String? // سبب الحظر النهائي إن وُجد
   createdAt     DateTime @default(now())
 
   trips       Trip[]
@@ -75,9 +75,9 @@ model Customer {
 model Vendor {
   id         Int      @id @default(autoincrement())
   name       String
-  category   String   @default("restaurant") // restaurant | grocery | pharmacy | store
+  category   String   @default("restaurant")
   logo       String?
-  status     String   @default("open") // open | closed | suspended
+  status     String   @default("open")
   commission Float    @default(15)
   rating     Float    @default(5)
   address    String?
@@ -103,10 +103,10 @@ model Product {
 }
 
 model Trip {
-  id            Int      @id @default(autoincrement())
-  number        String   @unique
-  type          String   @default("ride") // ride | delivery
-  status        String   @default("completed") // pending | accepted | arrived | in_progress | completed | cancelled
+  id            Int       @id @default(autoincrement())
+  number        String    @unique
+  type          String    @default("ride")
+  status        String    @default("completed")
   customerId    Int?
   driverId      Int?
   vendorId      Int?
@@ -117,15 +117,21 @@ model Trip {
   dropLat       Float?
   dropLng       Float?
   city          String?
-  distance      Float    @default(0)
-  duration      Int      @default(0) // دقائق
-  fare          Float    @default(0)
-  commission    Float    @default(0)
-  paymentMethod String   @default("cash") // cash | wallet | card
-  paymentStatus String   @default("paid") // paid | pending | refunded
+  distance      Float     @default(0)
+  duration      Int       @default(0)
+  fare          Float     @default(0)
+  commission    Float     @default(0)
+  paymentMethod String    @default("cash")
+  paymentStatus String    @default("paid")
   rating        Float?
-  scheduledAt   DateTime? // حجز مستقبلي (إن وُجد)
-  createdAt     DateTime @default(now())
+  scheduledAt   DateTime?
+  autoAssignedAt DateTime? // وقت التعيين التلقائي للسائق (للرحلات المجدولة)
+  cancelReasonKey String? // مفتاح سبب الإلغاء
+  cancelReason    String? // نص سبب الإلغاء
+  cancelledBy     String? // customer | driver | admin
+  cancelledAt     DateTime?
+  cancelAction    String? // accepted | fee_charged | escalated
+  createdAt     DateTime  @default(now())
 
   customer Customer? @relation(fields: [customerId], references: [id])
   driver   Driver?   @relation(fields: [driverId], references: [id])
@@ -134,37 +140,43 @@ model Trip {
 
 model Transaction {
   id        Int      @id @default(autoincrement())
-  type      String // topup | ride_payment | order_payment | commission | payout | refund
-  amount    Float
-  actorType String // customer | driver | platform
+  type      String // topup | ride_payment | commission | payout | refund | adjustment | cancellation_fee
+  amount    Float // موجب = دائن للمحفظة، سالب = خصم
+  actorType String
   actorId   Int?
-  refId     Int? // trip id أو withdrawal id
-  status    String   @default("success") // success | pending | failed
+  actorName String?
+  refId     Int?
+  note      String? // سبب التعديل اليدوي / التعويض
+  createdById   Int?
+  createdByName String?
+  status    String   @default("success")
   createdAt DateTime @default(now())
+
+  @@index([actorType, actorId])
 }
 
 model Promo {
-  id         Int      @id @default(autoincrement())
-  code       String   @unique
-  type       String   @default("percentage") // percentage | fixed
-  value      Float
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  type        String   @default("percentage")
+  value       Float
   maxDiscount Float?
-  minOrder   Float    @default(0)
-  usageLimit Int      @default(100)
-  usedCount  Int      @default(0)
-  service    String   @default("all") // all | ride | delivery
-  validFrom  DateTime @default(now())
-  validTo    DateTime
-  status     String   @default("active") // active | inactive | expired
-  createdAt  DateTime @default(now())
+  minOrder    Float    @default(0)
+  usageLimit  Int      @default(100)
+  usedCount   Int      @default(0)
+  service     String   @default("all")
+  validFrom   DateTime @default(now())
+  validTo     DateTime
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
 }
 
 model WithdrawalRequest {
   id        Int      @id @default(autoincrement())
   driverId  Int
   amount    Float
-  method    String   @default("bank") // bank | wallet
-  status    String   @default("pending") // pending | approved | rejected
+  method    String   @default("bank")
+  status    String   @default("pending")
   note      String?
   createdAt DateTime @default(now())
 
@@ -181,27 +193,26 @@ model Notification {
   id         Int      @id @default(autoincrement())
   title      String
   body       String
-  audience   String   @default("all") // all | drivers | customers
+  audience   String   @default("all")
   recipients Int      @default(0)
   sentBy     String?
   createdAt  DateTime @default(now())
 }
 
-// قاعدة تسعير لكل (نوع مركبة × نوع خدمة)
 model PricingRule {
   id              Int      @id @default(autoincrement())
-  vehicleType     String // car | motorcycle | bike
-  serviceType     String   @default("ride") // ride | delivery
-  distanceUnit    String   @default("km") // km | mile
-  baseFare        Float    @default(5) // أجرة البداية
-  bookingFee      Float    @default(2) // رسوم الحجز (ثابتة)
-  perKm           Float    @default(1.5) // سعر الوحدة (كم/ميل)
-  perMinute       Float    @default(0.5) // سعر الدقيقة
-  waitPerMinute   Float    @default(0.5) // سعر دقيقة الانتظار
-  freeWaitMinutes Int      @default(5) // دقائق انتظار مجانية
-  minimumFare     Float    @default(10) // الحد الأدنى
+  vehicleType     String
+  serviceType     String   @default("ride")
+  distanceUnit    String   @default("km")
+  baseFare        Float    @default(5)
+  bookingFee      Float    @default(2)
+  perKm           Float    @default(1.5)
+  perMinute       Float    @default(0.5)
+  waitPerMinute   Float    @default(0.5)
+  freeWaitMinutes Int      @default(5)
+  minimumFare     Float    @default(10)
   cancellationFee Float    @default(5)
-  taxPercent      Float    @default(15) // ضريبة %
+  taxPercent      Float    @default(15)
   currency        String   @default("ر.س")
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -210,29 +221,30 @@ model PricingRule {
   @@unique([vehicleType, serviceType])
 }
 
-// فئة مركبة / درجة خدمة (UberX / Comfort / XL / Black)
 model VehicleClass {
   id         Int      @id @default(autoincrement())
-  key        String   @unique // economy | comfort | xl | black | moto
+  key        String   @unique
   name       String
-  multiplier Float    @default(1) // معامل نسبةً للسعر الأساسي
+  multiplier Float    @default(1)
   capacity   Int      @default(4)
   active     Boolean  @default(true)
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
 }
 
-// رسوم خاصة ثابتة (مطار / جسور / رسوم ليلية)
 model ExtraFee {
   id        Int      @id @default(autoincrement())
-  key       String   @unique // airport | toll | night
+  key       String   @unique
   name      String
   amount    Float
+  scope     String   @default("global") // global | zone (الرسم الخاص بمنطقة)
+  zoneId    Int? // المنطقة التي يُطبّق فيها الرسم عند scope=zone
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  @@index([zoneId])
 }
 
-// منطقة تشغيل (مدينة/حي) بمعامل سعر خاص
 model Zone {
   id              Int      @id @default(autoincrement())
   name            String
@@ -240,35 +252,33 @@ model Zone {
   centerLat       Float
   centerLng       Float
   radiusKm        Float    @default(10)
-  priceMultiplier Float    @default(1) // معامل سعر المنطقة
-  currencyCode    String   @default("SAR") // العملة المعتمدة في هذه المنطقة
+  priceMultiplier Float    @default(1)
+  currencyCode    String   @default("SAR")
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
 }
 
-// قاعدة ذروة (مضاعف سعر حسب اليوم/الساعة)
 model SurgeRule {
   id         Int      @id @default(autoincrement())
   name       String
-  days       String   @default("0,1,2,3,4,5,6") // أيام الأسبوع (0=الأحد)
-  startHour  Int      @default(7) // 0-23
-  endHour    Int      @default(9) // 0-23 (حصري)
+  days       String   @default("0,1,2,3,4,5,6")
+  startHour  Int      @default(7)
+  endHour    Int      @default(9)
   multiplier Float    @default(1.5)
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
 }
 
-// مستندات توثيق السائق (KYC) — رخصة/استمارة/تأمين/هوية مع حالة موافقة لكل مستند
 model DriverDocument {
   id         Int       @id @default(autoincrement())
   driverId   Int
-  type       String // license | registration | insurance | id_card
-  fileUrl    String? // رابط صورة المستند
-  number     String? // رقم الوثيقة
-  status     String    @default("pending") // pending | approved | rejected
-  note       String? // سبب الرفض / ملاحظة
-  expiryDate DateTime? // تاريخ انتهاء الصلاحية
-  reviewedAt DateTime? // وقت المراجعة
+  type       String
+  fileUrl    String?
+  number     String?
+  status     String    @default("pending")
+  note       String?
+  expiryDate DateTime?
+  reviewedAt DateTime?
   createdAt  DateTime  @default(now())
 
   driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
@@ -276,92 +286,87 @@ model DriverDocument {
   @@unique([driverId, type])
 }
 
-// تقييم/مراجعة نصية متبادلة بعد الرحلة (مع إمكانية الإخفاء من الإدارة)
 model Review {
   id        Int      @id @default(autoincrement())
-  tripId    Int? // رقم الرحلة المرتبطة
-  tripNo    String? // رقم الرحلة المعروض (HG-...)
-  fromType  String // customer | driver
+  tripId    Int?
+  tripNo    String?
+  fromType  String
   fromId    Int?
   fromName  String?
-  toType    String // driver | customer
+  toType    String
   toId      Int?
   toName    String?
-  stars     Int      @default(5) // 1-5
+  stars     Int      @default(5)
   comment   String?
-  hidden    Boolean  @default(false) // مخفي من الإدارة (محتوى مخالف)
+  hidden    Boolean  @default(false)
   createdAt DateTime @default(now())
 }
 
-// سجل تدقيق إجراءات الإدارة (من فعل ماذا ومتى)
 model AuditLog {
   id        Int      @id @default(autoincrement())
   actorId   Int?
   actorName String?
   actorRole String?
-  action    String // approve_driver | suspend_driver | cancel_trip | refund_trip | reassign_trip | approve_withdrawal | reject_withdrawal | approve_document | reject_document | hide_review | unhide_review | create_product | update_product | delete_product | resolve_sos | dismiss_sos | reply_ticket | close_ticket | reopen_ticket | confirm_fraud | dismiss_fraud | scan_fraud | bulk_drivers | bulk_withdrawals | create_referral_code | reward_referral | approve_inspection | flag_inspection | create_blocklist | remove_blocklist | upsert_template
-  entity    String // driver | trip | withdrawal | document | review | product | sos | ticket | shift | fraud | referral | inspection | blocklist | template | reason
+  action    String
+  entity    String
   entityId  Int?
-  meta      String? // JSON تفاصيل إضافية
+  meta      String?
   createdAt DateTime @default(now())
 }
 
-// تنبيه طوارئ (SOS) — يُرفع من السائق أو العميل أثناء/قبل/بعد الرحلة
 model SosAlert {
-  id           Int       @id @default(autoincrement())
-  reporterType String // customer | driver
-  reporterId   Int?
-  reporterName String?
+  id            Int       @id @default(autoincrement())
+  reporterType  String
+  reporterId    Int?
+  reporterName  String?
   reporterPhone String?
-  tripId       Int?
-  tripNumber   String? // رقم الرحلة المعروض
-  lat          Float? // موقع الإبلاغ
-  lng          Float?
-  city         String?
-  reason       String    @default("panic") // panic | accident | unsafe_driver | unsafe_passenger | medical | route_deviation | other
-  severity     String    @default("high") // low | medium | high | critical
-  status       String    @default("open") // open | in_progress | resolved | dismissed
-  note         String? // ملاحظة من المبلِّغ
-  resolution   String? // ملخّص حلّ الإدارة
-  handlerId    Int? // المسؤول الذي تعامل
-  handlerName  String?
-  resolvedAt   DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  tripId        Int?
+  tripNumber    String?
+  lat           Float?
+  lng           Float?
+  city          String?
+  reason        String    @default("panic")
+  severity      String    @default("high")
+  status        String    @default("open")
+  note          String?
+  resolution    String?
+  handlerId     Int?
+  handlerName   String?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
-// تذكرة دعم — شكوى أو استفسار من عميل/سائق/تاجر
 model SupportTicket {
-  id           Int       @id @default(autoincrement())
-  number       String    @unique // HG-T-XXXX
-  subject      String
-  body         String
-  category     String    @default("general") // general | trip_issue | payment | account | driver_complaint | lost_item | refund_request | technical | other
-  priority     String    @default("normal") // low | normal | high | urgent
-  status       String    @default("open") // open | in_progress | waiting_user | resolved | closed
-  reporterType String // customer | driver | vendor
-  reporterId   Int?
-  reporterName String?
+  id            Int       @id @default(autoincrement())
+  number        String    @unique
+  subject       String
+  body          String
+  category      String    @default("general")
+  priority      String    @default("normal")
+  status        String    @default("open")
+  reporterType  String
+  reporterId    Int?
+  reporterName  String?
   reporterEmail String?
   reporterPhone String?
-  tripId       Int?
-  tripNumber   String?
-  assigneeId   Int? // معرّف المدير المسؤول
-  assigneeName String?
-  lastReplyBy  String? // user | admin
-  lastReplyAt  DateTime?
-  closedAt     DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  tripId        Int?
+  tripNumber    String?
+  assigneeId    Int?
+  assigneeName  String?
+  lastReplyBy   String?
+  lastReplyAt   DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   messages TicketMessage[]
 }
 
-// رسالة داخل تذكرة دعم (سلسلة محادثة)
 model TicketMessage {
   id         Int      @id @default(autoincrement())
   ticketId   Int
-  senderType String // user | admin
+  senderType String
   senderId   Int?
   senderName String?
   body       String
@@ -370,17 +375,16 @@ model TicketMessage {
   ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 }
 
-// علامة احتيال — يُولَّد آلياً من محرّك heuristic أو يدوياً من المراجعة
 model FraudFlag {
   id          Int       @id @default(autoincrement())
-  subjectType String // driver | customer | trip
+  subjectType String
   subjectId   Int
-  subjectRef  String? // اسم/رقم مرئي (HG-100023, اسم السائق...)
-  reason      String // high_cancel_rate | gps_jump | duplicate_phone | impossible_speed | rating_streak | refund_abuse | multi_account
-  score       Int       @default(50) // 0-100
-  severity    String    @default("medium") // low | medium | high
-  status      String    @default("open") // open | reviewing | confirmed | dismissed
-  evidence    String? // JSON بتفاصيل الحساب
+  subjectRef  String?
+  reason      String
+  score       Int       @default(50)
+  severity    String    @default("medium")
+  status      String    @default("open")
+  evidence    String?
   note        String?
   handlerId   Int?
   handlerName String?
@@ -392,149 +396,195 @@ model FraudFlag {
   @@index([status, severity])
 }
 
-// كود إحالة مملوك لعميل أو سائق — يُولّد مرّة وقابل لإعادة الاستخدام
 model ReferralCode {
-  id              Int      @id @default(autoincrement())
-  code            String   @unique
-  ownerType       String // customer | driver
-  ownerId         Int
-  ownerName       String?
-  usageCount      Int      @default(0)
-  rewardPerUse    Float    @default(10)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  code         String   @unique
+  ownerType    String
+  ownerId      Int
+  ownerName    String?
+  usageCount   Int      @default(0)
+  rewardPerUse Float    @default(10)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
 
   referrals Referral[]
 
   @@unique([ownerType, ownerId])
 }
 
-// إحالة فردية — كل مرة يُستخدم الكود من شخص جديد
 model Referral {
-  id            Int       @id @default(autoincrement())
-  codeId        Int
-  code          String // مكرّر لتسهيل العرض حتى لو حُذف الـ ReferralCode
-  referrerType  String // customer | driver
-  referrerId    Int
-  referrerName  String?
-  refereeType   String // customer | driver
-  refereeId     Int
-  refereeName   String?
-  status        String    @default("pending") // pending | completed | rewarded | cancelled
-  reward        Float     @default(0)
-  rewardedAt    DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime  @default(now())
+  id           Int       @id @default(autoincrement())
+  codeId       Int
+  code         String
+  referrerType String
+  referrerId   Int
+  referrerName String?
+  refereeType  String
+  refereeId    Int
+  refereeName  String?
+  status       String    @default("pending")
+  reward       Float     @default(0)
+  rewardedAt   DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
 
   refCode ReferralCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
 }
 
-// فحص فني للمركبة (قبل/بعد الرحلة أو دوري)
 model VehicleInspection {
-  id          Int      @id @default(autoincrement())
-  driverId    Int
-  type        String   @default("pre_trip") // pre_trip | post_trip | periodic
-  odometerKm  Int? // قراءة العدّاد
-  items       String? // JSON: [{key,label,ok,note}]
-  photos      String? // JSON: [url, ...]
-  notes       String?
-  damageScore Int      @default(0) // 0=ممتاز، 100=أضرار شديدة
-  status      String   @default("submitted") // submitted | approved | flagged | rejected
-  reviewerId  Int?
+  id           Int       @id @default(autoincrement())
+  driverId     Int
+  type         String    @default("pre_trip")
+  odometerKm   Int?
+  items        String?
+  photos       String?
+  notes        String?
+  damageScore  Int       @default(0)
+  status       String    @default("submitted")
+  reviewerId   Int?
   reviewerName String?
-  reviewedAt  DateTime?
-  createdAt   DateTime @default(now())
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
 
   driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@index([driverId, createdAt])
 }
 
-// سبب إلغاء قابل للتحرير (يحلّ محلّ النصّ الحرّ في التطبيقات)
 model CancellationReason {
   id        Int      @id @default(autoincrement())
-  key       String   @unique // late_driver, changed_mind, fare_too_high, ...
+  key       String   @unique
   labelAr   String
   labelEn   String
-  audience  String   @default("both") // driver | customer | both
+  audience  String   @default("both")
+  actionType    String  @default("auto_accept") // auto_accept | require_approval | escalate_support
+  refundPercent Float   @default(0) // نسبة الاسترداد للزبون عند هذا السبب (0-100)
+  chargeFee     Boolean @default(false) // هل يُطبّق رسم إلغاء
+  description   String? // شرح الإجراء المتّبع
   sortOrder Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 }
 
-// قيد منع/حظر (هاتف/بريد/هوية/جهاز)
 model BlockedEntity {
-  id         Int      @id @default(autoincrement())
-  kind       String // phone | email | id_number | device_id
-  value      String
-  reason     String?
-  blockedById Int?
+  id            Int       @id @default(autoincrement())
+  kind          String
+  value         String
+  reason        String?
+  blockedById   Int?
   blockedByName String?
-  active     Boolean  @default(true)
-  expiresAt  DateTime?
-  createdAt  DateTime @default(now())
+  active        Boolean   @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
 
   @@unique([kind, value])
 }
 
-// نقطة GPS مسجّلة على مسار رحلة — تُستخدم في Trip Replay
 model TripBreadcrumb {
   id         Int      @id @default(autoincrement())
   tripId     Int
-  sequence   Int // ترتيب النقطة على المسار (يبدأ من 0)
+  sequence   Int
   lat        Float
   lng        Float
-  speed      Float    @default(0) // كم/س
+  speed      Float    @default(0)
   recordedAt DateTime @default(now())
 
   @@index([tripId, sequence])
 }
 
-// عملة مدعومة + سعر صرفها مقابل العملة الأساسية (1.0 للأساسية)
 model Currency {
   id        Int      @id @default(autoincrement())
-  code      String   @unique // SAR, USD, EUR, AED, EGP, ...
+  code      String   @unique
   name      String
   nameAr    String
-  symbol    String // ر.س / $ / €
-  fxRate    Float    @default(1) // 1 وحدة أساسية = fxRate من هذه العملة
-  isBase    Boolean  @default(false) // واحدة فقط تكون base
+  symbol    String
+  fxRate    Float    @default(1)
+  isBase    Boolean  @default(false)
   active    Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// قالب إشعار جاهز مع متغيّرات {{name}} / {{trip_no}}
 model NotificationTemplate {
   id        Int      @id @default(autoincrement())
   key       String   @unique
   name      String
   title     String
   body      String
-  audience  String   @default("all") // all | drivers | customers
-  variables String? // JSON: ["name", "trip_no", ...]
+  audience  String   @default("all")
+  variables String?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// وردية عمل السائق — من تسجيل الدخول إلى تسجيل الخروج
 model DriverShift {
   id             Int       @id @default(autoincrement())
   driverId       Int
   startedAt      DateTime  @default(now())
   endedAt        DateTime?
-  durationMin    Int       @default(0) // مدّة الوردية بالدقائق
+  durationMin    Int       @default(0)
   totalTrips     Int       @default(0)
   completedTrips Int       @default(0)
   cancelledTrips Int       @default(0)
-  totalEarnings  Float     @default(0) // إجمالي ما حصّله السائق
-  totalKm        Float     @default(0) // إجمالي المسافة
+  totalEarnings  Float     @default(0)
+  totalKm        Float     @default(0)
   city           String?
-  status         String    @default("active") // active | ended
+  status         String    @default("active")
 
   driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@index([driverId, startedAt])
+}
+
+// رمز OTP لتسجيل الدخول في تطبيق الموبايل
+model OtpCode {
+  id        Int      @id @default(autoincrement())
+  sessionId String   @unique
+  phone     String
+  role      String   @default("customer")
+  codeHash  String
+  attempts  Int      @default(0)
+  consumed  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+// جهاز موبايل مسجّل (FCM token) لإرسال الإشعارات
+model DeviceToken {
+  id         Int      @id @default(autoincrement())
+  ownerType  String
+  ownerId    Int
+  token      String   @unique
+  platform   String   @default("android")
+  locale     String   @default("ar")
+  appVersion String?
+  active     Boolean  @default(true)
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([ownerType, ownerId])
+}
+
+// محاولة شحن محفظة عبر بوّابة دفع (Moyasar)
+model PaymentIntent {
+  id          Int      @id @default(autoincrement())
+  reference   String   @unique // رقم العملية الداخلي HG-PAY-...
+  providerId  String? // معرّف Moyasar
+  ownerType   String   @default("customer") // customer (لاحقاً driver)
+  ownerId     Int
+  amount      Float // بالعملة الأساسية (ر.س)
+  currency    String   @default("SAR")
+  purpose     String   @default("wallet_topup") // wallet_topup | ride_payment
+  status      String   @default("pending") // pending | succeeded | failed | cancelled
+  provider    String   @default("moyasar") // moyasar | dev
+  redirectUrl String? // checkout URL من Moyasar
+  meta        String? // JSON تفاصيل
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ownerType, ownerId])
 }

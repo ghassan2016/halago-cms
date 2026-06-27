@@ -4,7 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Send, Bell, Users, Car } from "lucide-react";
+import { Send, Bell, Users, Car, Bike } from "lucide-react";
 
 import { getNotifications, sendNotification } from "@/services";
 import { getErrorMessage } from "@/lib/api";
@@ -42,6 +42,7 @@ export default function NotificationsPage() {
   const audiences = [
     { value: "all", label: t("all"), icon: Bell },
     { value: "drivers", label: t("drivers"), icon: Car },
+    { value: "delivery", label: t("delivery"), icon: Bike },
     { value: "customers", label: t("customers"), icon: Users },
   ];
 
@@ -81,7 +82,7 @@ export default function NotificationsPage() {
               </div>
               <div className="space-y-1">
                 <Label>{t("audience")}</Label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {audiences.map((a) => {
                     const Icon = a.icon;
                     return (

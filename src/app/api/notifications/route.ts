@@ -22,13 +22,19 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const title = String(body?.title || "").trim();
   const text = String(body?.body || "").trim();
-  const audience = ["all", "drivers", "customers"].includes(body?.audience) ? body.audience : "all";
+  const audience = ["all", "drivers", "customers", "delivery"].includes(body?.audience) ? body.audience : "all";
 
   if (!title || !text) return fail("العنوان والنص مطلوبان", 422);
 
+  // مركبات الدليفري (تفصلهم عن سائقي الركاب) — قابلة للتوسعة لاحقاً عبر إعداد
+  const DELIVERY_VEHICLES = ["motorcycle", "bike", "scooter", "delivery"];
+
   let recipients = 0;
   if (audience === "drivers") {
-    recipients = await prisma.driver.count();
+    // سائقو الركاب فقط (استثناء مركبات الدليفري)
+    recipients = await prisma.driver.count({ where: { vehicleType: { notIn: DELIVERY_VEHICLES } } });
+  } else if (audience === "delivery") {
+    recipients = await prisma.driver.count({ where: { vehicleType: { in: DELIVERY_VEHICLES } } });
   } else if (audience === "customers") {
     recipients = await prisma.customer.count();
   } else {

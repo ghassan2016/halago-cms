@@ -45,17 +45,24 @@ export async function POST(req: NextRequest) {
 
   // المنطقة (بالـ id أو الإحداثيات)
   let zone = { name: "", multiplier: 1 };
+  let resolvedZoneId: number | null = null;
   if (body?.zoneId) {
     const z = await prisma.zone.findUnique({ where: { id: Number(body.zoneId) } });
-    if (z && z.active) zone = { name: z.name, multiplier: z.priceMultiplier };
+    if (z && z.active) {
+      zone = { name: z.name, multiplier: z.priceMultiplier };
+      resolvedZoneId = z.id;
+    }
   } else if (body?.lat !== undefined && body?.lng !== undefined) {
     const zones = await prisma.zone.findMany({ where: { active: true } });
-    let best: { name: string; multiplier: number; dist: number } | null = null;
+    let best: { id: number; name: string; multiplier: number; dist: number } | null = null;
     for (const z of zones) {
       const d = haversineKm(Number(body.lat), Number(body.lng), z.centerLat, z.centerLng);
-      if (d <= z.radiusKm && (!best || d < best.dist)) best = { name: z.name, multiplier: z.priceMultiplier, dist: d };
+      if (d <= z.radiusKm && (!best || d < best.dist)) best = { id: z.id, name: z.name, multiplier: z.priceMultiplier, dist: d };
     }
-    if (best) zone = { name: best.name, multiplier: best.multiplier };
+    if (best) {
+      zone = { name: best.name, multiplier: best.multiplier };
+      resolvedZoneId = best.id;
+    }
   }
 
   // فئة المركبة
@@ -65,14 +72,21 @@ export async function POST(req: NextRequest) {
     if (c && c.active) vehicleClass = { name: c.name, multiplier: c.multiplier };
   }
 
-  // الرسوم الخاصة
-  let extras: { name: string; amount: number }[] = [];
+  // الرسوم الخاصة: المختارة يدوياً + الرسوم الجغرافية لمنطقة الانطلاق تلقائياً (نقطة 24)
+  const extrasMap = new Map<number, { name: string; amount: number }>();
   if (Array.isArray(body?.extraFeeIds) && body.extraFeeIds.length) {
     const fees = await prisma.extraFee.findMany({
       where: { id: { in: body.extraFeeIds.map((x: any) => Number(x)) }, active: true },
     });
-    extras = fees.map((f) => ({ name: f.name, amount: f.amount }));
+    fees.forEach((f) => extrasMap.set(f.id, { name: f.name, amount: f.amount }));
   }
+  if (resolvedZoneId) {
+    const zoneFees = await prisma.extraFee.findMany({
+      where: { scope: "zone", zoneId: resolvedZoneId, active: true },
+    });
+    zoneFees.forEach((f) => extrasMap.set(f.id, { name: f.name, amount: f.amount }));
+  }
+  const extras = Array.from(extrasMap.values());
 
   const breakdown = computeFare(rule, distance, duration, waitMinutes, surge, zone, vehicleClass, extras);
 

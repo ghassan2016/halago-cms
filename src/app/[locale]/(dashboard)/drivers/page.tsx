@@ -4,9 +4,9 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Star, Check, Ban } from "lucide-react";
+import { Star, Check, Ban, Plus } from "lucide-react";
 
-import { getDrivers, updateDriver, bulkUpdateDrivers } from "@/services";
+import { getDriversList, createDriver, updateDriver, bulkUpdateDrivers } from "@/services";
 import { getErrorMessage } from "@/lib/api";
 import { Link } from "@/i18n/navigation";
 import { exportToCsv } from "@/lib/export-csv";
@@ -15,13 +15,34 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Modal } from "@/components/ui/modal";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { BulkBar } from "@/components/bulk-bar";
 import { confirm } from "@/components/ui/confirm";
 import { StatusBadge } from "@/components/status-badge";
 import { TableSkeleton, EmptyState, ErrorState } from "@/components/data-state";
 import { SearchBar, Pagination, useDebounced } from "@/components/list-toolbar";
 import { formatDate, formatCurrency } from "@/lib/utils";
+
+const TIER_VARIANT: Record<string, "secondary" | "outline" | "warning" | "default"> = {
+  bronze: "secondary",
+  silver: "outline",
+  gold: "warning",
+  platinum: "default",
+};
+const EMPTY_DRIVER = {
+  name: "",
+  phone: "",
+  email: "",
+  vehicleType: "",
+  carMake: "",
+  carModel: "",
+  plateNumber: "",
+  city: "",
+};
 
 export default function DriversPage() {
   const t = useTranslations("drivers");
@@ -30,12 +51,37 @@ export default function DriversPage() {
   const qc = useQueryClient();
   const [page, setPage] = React.useState(1);
   const [search, setSearch] = React.useState("");
+  const [sort, setSort] = React.useState("newest");
+  const [lowRated, setLowRated] = React.useState(false);
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
+  const [open, setOpen] = React.useState(false);
+  const [form, setForm] = React.useState(EMPTY_DRIVER);
   const debounced = useDebounced(search);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["drivers", page, debounced],
-    queryFn: () => getDrivers({ page, search: debounced }),
+    queryKey: ["drivers", page, debounced, sort, lowRated],
+    queryFn: () => getDriversList({ page, search: debounced, sort: sort === "newest" ? undefined : sort, lowRated }),
+  });
+
+  const createMut = useMutation({
+    mutationFn: () =>
+      createDriver({
+        name: form.name,
+        phone: form.phone,
+        email: form.email || undefined,
+        vehicleType: form.vehicleType || undefined,
+        carMake: form.carMake || undefined,
+        carModel: form.carModel || undefined,
+        plateNumber: form.plateNumber || undefined,
+        city: form.city || undefined,
+      }),
+    onSuccess: () => {
+      toast.success(t("created"));
+      setOpen(false);
+      setForm(EMPTY_DRIVER);
+      qc.invalidateQueries({ queryKey: ["drivers"] });
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const mutation = useMutation({
@@ -100,8 +146,25 @@ export default function DriversPage() {
           <h2 className="text-xl font-bold">{t("title")}</h2>
           <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <SearchBar value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} />
+          <select
+            className="flex h-10 rounded-md border border-input bg-background px-3 text-sm"
+            value={sort}
+            onChange={(e) => { setSort(e.target.value); setPage(1); }}
+            title={t("sortLabel")}
+          >
+            <option value="newest">{t("sort_newest")}</option>
+            <option value="rating">{t("sort_rating")}</option>
+            <option value="rating_asc">{t("sort_rating_asc")}</option>
+          </select>
+          <Button
+            variant={lowRated ? "default" : "outline"}
+            onClick={() => { setLowRated((v) => !v); setPage(1); }}
+          >
+            <Star className="h-4 w-4" />
+            {t("lowRated")}
+          </Button>
           <Button
             variant="outline"
             size="icon"
@@ -123,6 +186,10 @@ export default function DriversPage() {
           >
             <Download className="h-4 w-4" />
           </Button>
+          <Button onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" />
+            {t("add")}
+          </Button>
         </div>
       </div>
 
@@ -143,7 +210,7 @@ export default function DriversPage() {
         </CardHeader>
         <CardContent className="px-0 pt-4">
           {isLoading ? (
-            <TableSkeleton cols={6} />
+            <TableSkeleton cols={9} />
           ) : isError ? (
             <ErrorState />
           ) : drivers.length === 0 ? (
@@ -161,6 +228,7 @@ export default function DriversPage() {
                       />
                     </TableHead>
                     <TableHead>{t("driver")}</TableHead>
+                    <TableHead>{t("tier")}</TableHead>
                     <TableHead>{t("phone")}</TableHead>
                     <TableHead>{t("vehicle")}</TableHead>
                     <TableHead>{t("rating")}</TableHead>
@@ -187,7 +255,17 @@ export default function DriversPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell dir="ltr" className="text-start">{d.phone}</TableCell>
+                      <TableCell>
+                        {(() => {
+                          const tier = (d as any).tier as string | undefined;
+                          return tier ? (
+                            <Badge variant={TIER_VARIANT[tier] ?? "secondary"}>{t(`tier_${tier}` as any)}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell dir="ltr" className="whitespace-nowrap text-start tabular-nums">{d.phone}</TableCell>
                       <TableCell>{[d.carMake, d.carModel].filter(Boolean).join(" ") || d.vehicleType}</TableCell>
                       <TableCell>
                         <span className="inline-flex items-center gap-1">
@@ -237,6 +315,56 @@ export default function DriversPage() {
           )}
         </CardContent>
       </Card>
+
+      <Modal open={open} onClose={() => setOpen(false)} title={t("addTitle")}>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => { e.preventDefault(); createMut.mutate(); }}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>{t("name")}</Label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </div>
+            <div className="space-y-1">
+              <Label>{t("phone")}</Label>
+              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} dir="ltr" required />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>{t("email")}</Label>
+            <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} dir="ltr" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>{t("vehicleType")}</Label>
+              <Input value={form.vehicleType} onChange={(e) => setForm({ ...form, vehicleType: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>{t("city")}</Label>
+              <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label>{t("carMake")}</Label>
+              <Input value={form.carMake} onChange={(e) => setForm({ ...form, carMake: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>{t("carModel")}</Label>
+              <Input value={form.carModel} onChange={(e) => setForm({ ...form, carModel: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>{t("plateNumber")}</Label>
+              <Input value={form.plateNumber} onChange={(e) => setForm({ ...form, plateNumber: e.target.value })} dir="ltr" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>{t("cancel")}</Button>
+            <Button type="submit" disabled={createMut.isPending}>{t("save")}</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

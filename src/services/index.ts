@@ -57,6 +57,23 @@ export async function getDashboard() {
 import type { Driver, Customer, Trip, Vendor, Promo, Withdrawal, Transaction } from "@/types";
 
 export const getDrivers = (p?: ListParams) => getList<Driver>("/drivers", p);
+export interface DriversListParams extends ListParams {
+  sort?: string;
+  lowRated?: boolean;
+}
+export async function getDriversList(p: DriversListParams = {}): Promise<ListResult<Driver>> {
+  const res = await api.get("/drivers", {
+    params: {
+      page: p.page ?? 1,
+      per_page: p.per_page ?? 15,
+      search: p.search || undefined,
+      status: p.status || undefined,
+      sort: p.sort || undefined,
+      lowRated: p.lowRated ? "true" : undefined,
+    },
+  });
+  return { data: res.data?.data ?? [], meta: res.data?.meta ?? null };
+}
 export const getDriver = async (id: number | string) => unwrap<Driver>((await api.get(`/drivers/${id}`)).data);
 
 export interface LiveDriver {
@@ -95,11 +112,31 @@ export const cancelTrip = async (id: number | string) =>
   (await api.patch(`/trips/${id}`, { action: "cancel" })).data;
 export const reassignTrip = async (id: number | string, driverId: number) =>
   (await api.patch(`/trips/${id}`, { action: "reassign", driverId })).data;
-export const refundTrip = async (id: number | string) =>
-  (await api.patch(`/trips/${id}`, { action: "refund" })).data;
+export const refundTrip = async (id: number | string, deductDriver = false) =>
+  (await api.patch(`/trips/${id}`, { action: "refund", deductDriver })).data;
+
+// ===== Wallet adjustments (تعويض/خصم يدوي) =====
+export const adjustWallet = async (
+  ownerType: "customer" | "driver",
+  ownerId: number,
+  amount: number,
+  note: string
+) => (await api.post(`/wallet/adjust`, { ownerType, ownerId, amount, note })).data;
+
+// ===== Create customer / driver (إضافة يدوية من الداشبورد) =====
+export const createCustomer = async (body: Record<string, unknown>) =>
+  unwrap<Customer>((await api.post(`/customers`, body)).data);
+export const createDriver = async (body: Record<string, unknown>) =>
+  unwrap<Driver>((await api.post(`/drivers`, body)).data);
 
 // ===== Vendors =====
 export const getVendors = (p?: ListParams) => getList<Vendor>("/vendors", p);
+export const createVendor = async (body: Record<string, unknown>) =>
+  unwrap<Vendor>((await api.post(`/vendors`, body)).data);
+export const updateVendor = async (id: number | string, body: Record<string, unknown>) =>
+  unwrap<Vendor>((await api.patch(`/vendors/${id}`, body)).data);
+export const deleteVendor = async (id: number | string) =>
+  (await api.delete(`/vendors/${id}`)).data;
 
 // ===== Finance =====
 export async function getTransactions(p?: ListParams) {

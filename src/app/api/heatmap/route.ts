@@ -62,9 +62,56 @@ export async function GET(req: NextRequest) {
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
 
+  // ===== طبقة العرض الآني: السائقون المتاحون + الطلب الحالي (نقطة 1) =====
+  // أزمة سيارات = طلب مرتفع وعرض منخفض → اقتراح ضرب الأسعار في تلك المنطقة.
+  const [availableDrivers, pendingTrips] = await Promise.all([
+    prisma.driver.findMany({
+      where: { available: true, status: "approved", lat: { not: null }, lng: { not: null } },
+      select: { lat: true, lng: true, city: true },
+      take: 2000,
+    }),
+    prisma.trip.findMany({
+      where: { status: "pending", pickupLat: { not: null } },
+      select: { city: true },
+      take: 5000,
+    }),
+  ]);
+
+  const driverPoints = availableDrivers
+    .filter((d) => d.lat != null && d.lng != null)
+    .map((d) => ({ lat: d.lat as number, lng: d.lng as number }));
+
+  // نسبة الطلب/العرض لكل مدينة + اقتراح مضاعِف الذروة
+  const supplyByCity = new Map<string, number>();
+  for (const d of availableDrivers) if (d.city) supplyByCity.set(d.city, (supplyByCity.get(d.city) || 0) + 1);
+  const demandByCity = new Map<string, number>();
+  for (const p of pendingTrips) if (p.city) demandByCity.set(p.city, (demandByCity.get(p.city) || 0) + 1);
+
+  const allCityNames = new Set(Array.from(supplyByCity.keys()).concat(Array.from(demandByCity.keys())));
+  const demandSupply = Array.from(allCityNames)
+    .map((name) => {
+      const demand = demandByCity.get(name) || 0;
+      const supply = supplyByCity.get(name) || 0;
+      const ratio = demand / Math.max(supply, 1);
+      // مضاعِف مقترح بناءً على نسبة النقص
+      let suggestedSurge = 1;
+      if (ratio >= 2) suggestedSurge = 2;
+      else if (ratio >= 1.5) suggestedSurge = 1.8;
+      else if (ratio >= 1) suggestedSurge = 1.5;
+      else if (ratio >= 0.6) suggestedSurge = 1.2;
+      const shortage = demand > supply && demand > 0;
+      return { name, demand, supply, ratio: Number(ratio.toFixed(2)), suggestedSurge, shortage };
+    })
+    .sort((a, b) => b.ratio - a.ratio);
+
   return ok({
     points,
+    driverPoints,
     cities,
+    demandSupply,
+    shortageCities: demandSupply.filter((c) => c.shortage),
+    onlineDrivers: availableDrivers.length,
+    openDemand: pendingTrips.length,
     total: trips.length,
     topCity: cities[0] ?? null,
   });

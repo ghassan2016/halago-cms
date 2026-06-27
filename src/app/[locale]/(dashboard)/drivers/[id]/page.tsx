@@ -1,17 +1,21 @@
 "use client";
 
+import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Star, Car, Wallet, Route, FileText, Check, X, Clock } from "lucide-react";
+import { Star, Car, Wallet, Route, FileText, Check, X, Clock, Ban, AlertTriangle } from "lucide-react";
 
-import { getDriver, reviewDriverDocument } from "@/services";
+import { getDriver, reviewDriverDocument, updateDriver, adjustWallet } from "@/services";
 import { getErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { confirm } from "@/components/ui/confirm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { StatCard } from "@/components/stat-card";
@@ -21,6 +25,13 @@ import { EmptyState } from "@/components/data-state";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/utils";
 import type { DriverDocument } from "@/types";
 
+const TIER_VARIANT: Record<string, "secondary" | "outline" | "warning" | "default"> = {
+  bronze: "secondary",
+  silver: "outline",
+  gold: "warning",
+  platinum: "default",
+};
+
 export default function DriverDetailPage() {
   const t = useTranslations("details");
   const tt = useTranslations("trips");
@@ -28,6 +39,9 @@ export default function DriverDetailPage() {
   const qc = useQueryClient();
   const params = useParams();
   const id = params.id as string;
+
+  const [amount, setAmount] = React.useState("");
+  const [note, setNote] = React.useState("");
 
   const { data: d, isLoading } = useQuery({ queryKey: ["driver", id], queryFn: () => getDriver(id) });
 
@@ -41,6 +55,26 @@ export default function DriverDetailPage() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
+  const banMut = useMutation({
+    mutationFn: (banReason: string) => updateDriver(id, { status: "banned", banReason }),
+    onSuccess: () => {
+      toast.success(t("banned"));
+      qc.invalidateQueries({ queryKey: ["driver", id] });
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const walletMut = useMutation({
+    mutationFn: (amt: number) => adjustWallet("driver", Number(id), amt, note),
+    onSuccess: () => {
+      toast.success(t("walletAdjusted"));
+      setAmount("");
+      setNote("");
+      qc.invalidateQueries({ queryKey: ["driver", id] });
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
   if (isLoading || !d) {
     return <Skeleton className="h-96 rounded-xl" />;
   }
@@ -48,6 +82,23 @@ export default function DriverDetailPage() {
   const documents = (d.documents ?? []) as DriverDocument[];
   const pendingDocs = documents.filter((doc) => doc.status === "pending").length;
   const allApproved = documents.length > 0 && documents.every((doc) => doc.status === "approved");
+  const tier = (d as any).tier as string | undefined;
+  const banReason = (d as any).banReason as string | undefined;
+  const expiringDocs = ((d as any).expiringDocs ?? []) as DriverDocument[];
+
+  async function onBan() {
+    const ok = await confirm({ message: t("banConfirm"), variant: "danger" });
+    if (!ok) return;
+    const reason = window.prompt(t("banReasonPrompt"))?.trim();
+    if (!reason) return;
+    banMut.mutate(reason);
+  }
+
+  function onAdjust(sign: 1 | -1) {
+    const amt = Number(amount) * sign;
+    if (!amt || Number.isNaN(amt)) return;
+    walletMut.mutate(amt);
+  }
 
   return (
     <div className="space-y-4">
@@ -62,11 +113,22 @@ export default function DriverDetailPage() {
               <h2 className="text-lg font-bold">{d.name}</h2>
               <p className="text-sm text-muted-foreground" dir="ltr">{d.phone}</p>
             </div>
-            {d.status === "approved" ? (
-              <StatusBadge status={d.available ? "active" : "closed"} />
-            ) : (
-              <StatusBadge status={d.status} />
-            )}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {d.status === "approved" ? (
+                <StatusBadge status={d.available ? "active" : "closed"} />
+              ) : (
+                <StatusBadge status={d.status} />
+              )}
+              {tier ? (
+                <Badge variant={TIER_VARIANT[tier] ?? "secondary"}>{t(`tier_${tier}` as any)}</Badge>
+              ) : null}
+            </div>
+            {d.status === "banned" && banReason ? (
+              <div className="w-full rounded-md bg-destructive/10 p-2 text-start text-xs text-destructive">
+                <span className="font-medium">{t("banReason")}: </span>
+                {banReason}
+              </div>
+            ) : null}
             <div className="mt-2 w-full">
               <InfoRow label={t("email")} value={<span dir="ltr">{d.email || "—"}</span>} />
               <InfoRow label={t("vehicle")} value={[d.carMake, d.carModel].filter(Boolean).join(" ") || d.vehicleType} />
@@ -86,6 +148,57 @@ export default function DriverDetailPage() {
                 }
               />
             </div>
+
+            {/* تعديل الرصيد (تعويض/خصم) */}
+            <div className="mt-4 w-full space-y-2 border-t pt-4 text-start">
+              <p className="text-sm font-medium">{t("walletAdjust")}</p>
+              <p className="text-xs text-muted-foreground">{t("walletAdjustHint")}</p>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder={t("amount")}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                dir="ltr"
+              />
+              <Input placeholder={t("note")} value={note} onChange={(e) => setNote(e.target.value)} />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="success"
+                  className="flex-1"
+                  disabled={!amount || walletMut.isPending}
+                  onClick={() => onAdjust(1)}
+                >
+                  {t("credit")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  disabled={!amount || walletMut.isPending}
+                  onClick={() => onAdjust(-1)}
+                >
+                  {t("debit")}
+                </Button>
+              </div>
+            </div>
+
+            {/* حظر نهائي */}
+            {d.status !== "banned" ? (
+              <div className="mt-4 w-full space-y-2 border-t pt-4 text-start">
+                <Button
+                  variant="destructive"
+                  className="w-full"
+                  disabled={banMut.isPending}
+                  onClick={onBan}
+                >
+                  <Ban className="h-4 w-4" />
+                  {t("ban")}
+                </Button>
+                <p className="text-xs text-muted-foreground">{t("banNote")}</p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -97,6 +210,31 @@ export default function DriverDetailPage() {
             <StatCard label={t("rating")} value={Number(d.rating).toFixed(1)} icon={Star} tone="warning" />
             <StatCard label={t("wallet")} value={formatCurrency(d.walletBalance)} icon={Wallet} tone="success" />
           </div>
+
+          {/* وثائق قاربت على الانتهاء */}
+          {expiringDocs.length > 0 ? (
+            <Card className="border-warning/40 bg-warning/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base text-warning">
+                  <AlertTriangle className="h-4 w-4" />
+                  {t("expiringDocs")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-muted-foreground">{t("expiringDocsHint")}</p>
+                <ul className="space-y-1">
+                  {expiringDocs.map((doc) => (
+                    <li key={doc.id} className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{tk(`type_${doc.type}` as any)}</span>
+                      <span className="text-muted-foreground">
+                        {t("expiresOn")}: {doc.expiryDate ? formatDate(doc.expiryDate) : "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* مستندات التوثيق (KYC) */}
           <Card>
